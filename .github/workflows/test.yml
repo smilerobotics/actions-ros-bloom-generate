@@ -1,0 +1,44 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test_vcs:
+    runs-on: ubuntu-20.04
+    steps:
+      - run: |
+          echo "repositories:" >/tmp/vcs.repos
+          echo "  navigation:" >>/tmp/vcs.repos
+          echo "    type: git" >>/tmp/vcs.repos
+          echo "    url: https://github.com/smilerobotics/navigation.git" >>/tmp/vcs.repos
+          echo "    version: noetic-devel" >>/tmp/vcs.repos
+          echo "  teb_local_planner:" >>/tmp/vcs.repos
+          echo "    type: git" >>/tmp/vcs.repos
+          echo "    url: https://github.com/smilerobotics/teb_local_planner" >>/tmp/vcs.repos
+          echo "    version: melodic-devel" >>/tmp/vcs.repos
+        shell: bash
+      - uses: smilerobotics/actions-ros-bloom-generate@v1
+        with:
+          repository_type: vcs
+          vcs_setting_file: /tmp/vcs.repos
+          targets: ./navigation/map_server ./navigation/voxel_grid ./navigation/costmap_2d ./navigation/nav_core ./navigation/navfn ./navigation/base_local_planner ./navigation/carrot_planner ./navigation/dwa_local_planner ./navigation/rotate_recovery ./navigation/fake_localization ./navigation/move_slow_and_clear ./navigation/clear_costmap_recovery ./navigation/global_planner ./navigation/amcl ./navigation/move_base ./navigation/navigation ./teb_local_planner
+          ros_distro: noetic
+          name_prefix: vcs-noetic-
+  test_github:
+    strategy:
+      matrix:
+        ROS_DISTRO: ["melodic", "noetic"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: smilerobotics/actions-ros-bloom-generate@v1
+        with:
+          repository_owner: smilerobotics
+          repository: rplidar_ros
+          ref: reconfigure
+          ros_distro: ${{ matrix.ROS_DISTRO }}
+          targets: ./rplidar_ros
+          name_prefix: github-${{ matrix.ROS_DISTRO }}-
+          repository_type: github

@@ -1,0 +1,126 @@
+name: 'ros-bloom-generate'
+description: 'Run bloom-generate for ROS package'
+
+inputs:
+  targets:
+    required: true
+    description: 'Space separated list of directories of package.xml. Path should be relative to the vcs root directory or the target repository root directory.'
+  setup_dependencies_script_path:
+    required: true
+    description: 'Path of the script to be executed before bloom-generate.'
+    default: ''
+  ros_distro:
+    required: true
+    description: 'ROS distribution.'
+
+  repository_type:
+    required: true
+    description: 'vcs or github'
+
+  vcs_setting_file:
+    description: 'Path of the file for vcs import. If repository_type == vcs, required.'
+
+  repository_owner:
+    description: 'Owner part of GitHub Repository path. If repository_type == github, required.'
+  repository:
+    description: 'Repository part of GitHub Repository path. If repository_type == github, required.'
+  ref:
+    description: 'Ref of GitHub Repository. If repository_type == github, required.'
+
+  save_as_release_assets:
+    required: true
+    description: 'Save artifacts as release assets.'
+    default: false
+
+  tag_prefix:
+    description: 'Prefix of the release tag. If save_as_release_assets == true, required.'
+  gh_token:
+    description: 'token for gh (GitHub CLI). If save_as_release_assets == true, required.'
+
+  save_as_workflow_artifacts:
+    required: true
+    description: 'Save artifacts as workflow artifacts.'
+    default: true
+
+  name_prefix:
+    description: 'Prefix of the artifact name. If save_as_workflow_artifacts == true, required.'
+
+
+runs:
+  using: "composite"
+  steps:
+    - if: ${{ inputs.repository_type != 'vcs' &&  inputs.repository_type != 'github' }}
+      run: |
+        echo "Set repository_type to vcs or github"
+        exit 1
+      shell: bash
+    # checkout
+    - if: ${{ inputs.repository_type == 'vcs' }}
+      uses: smilerobotics/actions-vcs-import@v1
+      with:
+        vcs_setting_file: ${{ inputs.vcs_setting_file }}
+        target_dir: ./src
+    - if: ${{ inputs.repository_type == 'github' }}
+      uses: actions/checkout@v2
+      with:
+        repository: ${{ inputs.repository_owner }}/${{ inputs.repository }}
+        path: ./src/${{ inputs.repository }}
+        ref: ${{ inputs.ref }}
+    # generate
+    - if: ${{ inputs.ros_distro == 'noetic' }}
+      uses: smilerobotics/actions-ros-bloom-generate-noetic@v1
+      id: bloom_generate_noetic
+      with:
+         output_dir: "debs"
+         source_dir: "src"
+         targets: "${{ inputs.targets }}"
+         setup_dependencies_script_path: "${{ inputs.setup_dependencies_script_path }}"
+    - if: ${{ inputs.ros_distro == 'melodic' }}
+      uses: smilerobotics/actions-ros-bloom-generate-melodic@v1
+      id: bloom_generate_melodic
+      with:
+         output_dir: "debs"
+         source_dir: "src"
+         targets: "${{ inputs.targets }}"
+         setup_dependencies_script_path: "${{ inputs.setup_dependencies_script_path }}"
+    - run: |
+        echo "::set-output name=deb_files::$(echo -n ${{ steps.bloom_generate_melodic.outputs.deb_files }})$(echo -n ${{ steps.bloom_generate_noetic.outputs.deb_files }})"
+        echo "::set-output name=rosdep_file::$(echo -n ${{ steps.bloom_generate_melodic.outputs.rosdep_file }})$(echo -n ${{ steps.bloom_generate_noetic.outputs.rosdep_file }})"
+        echo "::set-output name=output_dir::$(echo -n ${{ steps.bloom_generate_melodic.outputs.output_dir }})$(echo -n ${{ steps.bloom_generate_noetic.outputs.output_dir }})"
+      id: artifacts
+      shell: bash
+    # summary
+    - if: ${{ inputs.repository_type == 'vcs' }}
+      run: |
+        cd ./src/
+        vcs export --exact >vcs_export.repos
+        echo "::set-output name=summary_file::$(pwd)/vcs_export.repos"
+      id: summary_vcs
+      shell: bash
+    - if: ${{ inputs.repository_type == 'github' }}
+      run: |
+        cd ./src/${{ inputs.repository }}
+        echo "https://github.com/${{ inputs.repository_owner }}/${{ inputs.repository }}/tree/$(git log -1 --format='%H')" >summary.txt
+        echo "::set-output name=summary_file::$(pwd)/summary.txt"
+      id: summary_github
+      shell: bash
+    - run: |
+        echo "::set-output name=summary_file::$(echo -n ${{ steps.summary_vcs.outputs.summary_file }})$(echo -n ${{ steps.summary_github.outputs.summary_file }})"
+      id: summary
+      shell: bash
+    # save
+    - if: ${{ inputs.save_as_release_assets == 'true' }}
+      run: gh release create ${{ inputs.tag_prefix }}$(/bin/date -u "+%Y-%m-%d-%H%M%S") ${{ steps.artifacts.outputs.deb_files }} ${{ steps.artifacts.outputs.rosdep_file }} -n "$(cat ${{ steps.summary.outputs.summary_file }} | sed 's/ /\&nbsp;/g')"
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh_token }}
+    - if: ${{ inputs.save_as_workflow_artifacts == 'true' }}
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ inputs.name_prefix }}deb-and-rosdep-files
+        path: ${{ steps.artifacts.outputs.output_dir }}
+    - if: ${{ inputs.save_as_workflow_artifacts == 'true' }}
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ inputs.name_prefix }}summary
+        path: ${{ steps.summary.outputs.summary_file }}
