@@ -61,7 +61,7 @@ runs:
         vcs_setting_file: ${{ inputs.vcs_setting_file }}
         target_dir: ./src
     - if: ${{ inputs.repository_type == 'github' }}
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         repository: ${{ inputs.repository_owner }}/${{ inputs.repository }}
         path: ./src/${{ inputs.repository }}
